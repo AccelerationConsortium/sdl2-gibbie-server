@@ -1,0 +1,65 @@
+# sdl2-gibbie-server configuration. Copy to config.toml on the Gibbie PC.
+# Everything here is READ-ONLY monitoring: no probe may actuate, open a serial
+# port, take RTDE control, or start a robot session.
+
+[service]
+host = "0.0.0.0"
+port = 8070
+# How often each device is probed (seconds). /status never probes inline.
+poll_interval_s = 10
+# Consecutive failed probes before a device reads `unknown` (STATUS_SPEC §2.1:
+# a gateway that cannot reach its hardware). One miss is not an outage.
+unreachable_after = 2
+
+# ---------------------------------------------------------------------------
+# Devices. The table key is the equipment_id the dashboard registers.
+# `probe` selects the probe implementation in gibbie_server/probes/.
+# ---------------------------------------------------------------------------
+
+[devices.gibbie_workflow]
+name = "Gibbie Workflow"
+kind = "other"
+probe = "ui_bridge"
+# The Gibbie UI bridge (sdl2_sampleprep_platform/user-interface/server/app.py)
+# runs on this PC and knows whether a run is in progress and at which stage.
+url = "http://127.0.0.1:8000"
+
+[devices.gibbie_ur_arm]
+name = "UR Arm (Gibbie)"
+kind = "robot_arm"
+probe = "ur_dashboard"
+# UR Dashboard Server: plain-text TCP, read-only queries only
+# (robotmode / safetystatus / programState). Never RTDEControlInterface.
+host = "192.168.1.100"
+port = 29999
+
+[devices.gibbie_balance]
+name = "XPR Balance (Gibbie)"
+kind = "other"
+probe = "http_endpoint"
+# Mettler XPR SOAP web service. Only reachability is observed; the weighing
+# state is not, so the tile describes the endpoint, not the weighing.
+url = "http://192.168.1.1:8002/MT/Laboratory/Balance/XprXsr/V03/MT"
+
+[devices.gibbie_flex]
+name = "Opentrons Flex (Gibbie)"
+kind = "liquid_handler"
+probe = "flex"
+# robot-server, when it runs (it is stopped while the Gibbie REPL owns the
+# hardware). 502 from nginx == robot-server stopped, robot itself alive.
+robot_server_url = "http://192.168.254.81:31950"
+# Optional SSH probe for a live REPL session (the Gibbie driver's python3).
+# Uses the alias from ~/.ssh/config; password from env GIBBIE_FLEX_SSH_PASSWORD
+# when the key needs one. Set enabled = false to skip.
+ssh_alias = "otflex"
+ssh_enabled = true
+# Camera stream the Gibbie UI can start on the robot.
+camera_url = "http://172.31.34.56:8080/video"
+
+[devices.gibbie_hotplate]
+name = "IKA Hotplate (Gibbie)"
+kind = "other"
+probe = "serial_port"
+# Presence of the COM port only. The workflow owns the port; a serial port
+# cannot be shared, so this probe never opens it.
+port = "COM7"
