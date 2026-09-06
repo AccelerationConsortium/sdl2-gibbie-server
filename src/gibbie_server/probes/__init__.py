@@ -7,8 +7,10 @@ from .base import Observation, Probe
 from .flex import FlexProbe
 from .http_endpoint import HttpEndpointProbe
 from .serial_port import SerialPortProbe
+from .tcp_port import TcpPortProbe
 from .ui_bridge import UiBridgeProbe
 from .ur_dashboard import UrDashboardProbe
+from .windows_service import WindowsServiceProbe
 
 PROBES: dict[str, type[Probe]] = {
     UiBridgeProbe.probe_type: UiBridgeProbe,
@@ -16,6 +18,8 @@ PROBES: dict[str, type[Probe]] = {
     HttpEndpointProbe.probe_type: HttpEndpointProbe,
     FlexProbe.probe_type: FlexProbe,
     SerialPortProbe.probe_type: SerialPortProbe,
+    TcpPortProbe.probe_type: TcpPortProbe,
+    WindowsServiceProbe.probe_type: WindowsServiceProbe,
 }
 
 

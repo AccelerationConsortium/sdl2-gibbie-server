@@ -1,0 +1,76 @@
+# sdl2-gibbie-server configuration for the **Process Chemistry (LLE) bench**.
+# Copy to config.toml on sdl2-pc-00-lle. Same code as the Gibbie bench; the
+# devices are entirely config-driven, so nothing here is a fork.
+#
+# Everything is READ-ONLY monitoring. No probe may actuate, open a serial port,
+# take RTDE control, start a robot session, open a SOAP session on the balance,
+# or start/stop a Windows service.
+
+[service]
+host = "0.0.0.0"
+port = 8070
+poll_interval_s = 10
+unreachable_after = 2
+
+# ---------------------------------------------------------------------------
+# Devices. The table key is the equipment_id the dashboard registers.
+# Addresses verified from this PC on 2026-09-06; what answers and what does not
+# is recorded per device, because it decides what each tile can honestly claim.
+# ---------------------------------------------------------------------------
+
+[devices.lle_ur5_arm]
+name = "UR5-CB3 Arm (Process Chemistry)"
+kind = "robot_arm"
+probe = "ur_dashboard"
+# Lab switch. Read-only dashboard queries only, never RTDE (connecting the
+# control interface uploads and runs a program, which would seize the arm).
+# This is a CB3, so it may answer `safetymode` rather than `safetystatus`;
+# the probe tries both and records which one answered.
+host = "192.168.254.16"
+port = 29999
+
+[devices.lle_xpr_balance]
+name = "XPR Balance (Process Chemistry)"
+kind = "other"
+probe = "http_endpoint"
+# Mettler XPR SOAP web service on port 81 (a GET answers HTTP 400, which is the
+# service alive and refusing GET). Reachability only: this probe never opens a
+# SOAP session, so it cannot collide with the LLE workflow's own session.
+# mt-xpr-balance-server replaces this tile when it is deployed here.
+url = "http://192.168.254.13:81/MT/Laboratory/Balance/XprXsr/V03/MT"
+
+[devices.lle_easymax]
+name = "EasyMax (Process Chemistry)"
+kind = "other"
+probe = "tcp_port"
+# The EasyMax itself (192.168.254.12) answers on no port we can reach. What is
+# observable is Mettler's Reactor Device Server, which runs ON THIS PC and
+# serves OPC UA on loopback — the same endpoint automated-lle connects to.
+# So this tile means "the reactor service is up", not "the reactor is fine".
+# A real state read needs an OPC UA session (mt-easymax-server, later).
+host = "127.0.0.1"
+port = 50008
+label = "Mettler Toledo Reactor Device Server (OPC UA)"
+
+[devices.lle_hplc]
+name = "HPLC (Process Chemistry)"
+kind = "hplc"
+probe = "windows_service"
+# The HPLC answers on none of its network ports: it is ChemStation-driven from
+# this PC, not OpenLab-CDS-driven like the UPLC-MS on its own bench. The honest
+# observable is the vendor's data service here. `sc query` only; starting it is
+# a host-ops action with its own whitelist, never a monitor's job.
+service = "Agilent Chemstation Data Service"
+label = "Agilent ChemStation data service"
+
+[devices.lle_ph_unit]
+name = "pH Unit (Process Chemistry)"
+kind = "other"
+probe = "tcp_port"
+# Pi Zero 2W running PiZeroCam (camera + LED + motor, colorimetric pH). The
+# camera software is not a service yet, so there is no endpoint to ask; SSH
+# answering proves the Pi is up and nothing more. Swap this for an
+# http_endpoint probe once image_server runs as a unit.
+host = "172.31.60.3"
+port = 22
+label = "pH Pi (sdl2-pi0-lle-pizerocam) SSH"

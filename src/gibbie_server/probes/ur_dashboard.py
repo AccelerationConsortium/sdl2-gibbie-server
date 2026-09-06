@@ -7,7 +7,9 @@ control interface uploads and runs a program on the controller the moment it
 connects, which would seize the arm from the Gibbie workflow.
 
 Dashboard answers look like ``Robotmode: RUNNING``, ``Safetystatus: NORMAL``,
-``PLAYING rtde_control.urp``.
+``PLAYING rtde_control.urp``. Older CB3 controllers answer ``safetymode``
+rather than ``safetystatus``; the probe tries the newer command first and falls
+back, recording which one answered in ``details.safety_source``.
 """
 
 from __future__ import annotations
@@ -87,15 +89,25 @@ class UrDashboardProbe(Probe):
         try:
             with self._factory(self.host, self.port) as dash:
                 robotmode = _value(dash.query("robotmode"))
-                safety = _value(dash.query("safetystatus"))
+                safety_reply = dash.query("safetystatus")
+                safety_source = "safetystatus"
+                if not safety_reply.lower().startswith("safetystatus"):
+                    # Older controllers (CB3 / PolyScope 3.x) answer `safetymode`
+                    # instead and reject `safetystatus`. The value vocabulary
+                    # overlaps, so interpret() handles either.
+                    safety_reply = dash.query("safetymode")
+                    safety_source = "safetymode"
+                safety = _value(safety_reply)
                 program = dash.query("programState")
                 loaded = dash.query("get loaded program")
         except (OSError, socket.timeout) as exc:
             return Observation.unreachable(f"UR dashboard server not answering at {self.target}: {exc}")
-        return self.interpret(robotmode, safety, program, loaded)
+        return self.interpret(robotmode, safety, program, loaded, safety_source=safety_source)
 
     @staticmethod
-    def interpret(robotmode: str, safety: str, program: str, loaded: str) -> Observation:
+    def interpret(
+        robotmode: str, safety: str, program: str, loaded: str, *, safety_source: str = "safetystatus"
+    ) -> Observation:
         prog_state = program.split(" ", 1)[0].upper() if program else ""
         prog_name = program.split(" ", 1)[1] if " " in program else None
         loaded_name = _value(loaded) if loaded.lower().startswith("loaded program") else None
@@ -105,7 +117,10 @@ class UrDashboardProbe(Probe):
             "safety": ComponentStatus(connected=True, state=safety.lower() or "unknown"),
             "program": ComponentStatus(connected=prog_state == "PLAYING", state=prog_state.lower() or "unknown", message=prog_name or loaded_name),
         }
-        details = {"robotmode": robotmode, "safetystatus": safety, "program_state": program, "loaded_program": loaded_name}
+        details = {
+            "robotmode": robotmode, "safetystatus": safety, "safety_source": safety_source,
+            "program_state": program, "loaded_program": loaded_name,
+        }
         now = datetime.now(timezone.utc)
 
         if safety in _ESTOP:

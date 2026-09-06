@@ -6,8 +6,10 @@ from sdl_lab_contract import ComponentStatus
 from gibbie_server.probes.flex import FlexProbe
 from gibbie_server.probes.http_endpoint import HttpEndpointProbe
 from gibbie_server.probes.serial_port import SerialPortProbe
+from gibbie_server.probes.tcp_port import TcpPortProbe
 from gibbie_server.probes.ui_bridge import UiBridgeProbe
 from gibbie_server.probes.ur_dashboard import UrDashboardProbe
+from gibbie_server.probes.windows_service import WindowsServiceProbe
 
 from conftest import device
 
@@ -177,3 +179,152 @@ def test_serial_port_presence_only():
     assert present.reachable and present.state == "ready" and "not monitored" in present.message
     absent = SerialPortProbe("h", device("serial_port", port="COM7"), ports=lambda: [_Port("COM3")]).probe()
     assert absent.reachable is False and absent.details["ports_present"] == ["COM3"]
+
+
+# -- TCP port ----------------------------------------------------------------
+
+class _Sock:
+    def __init__(self) -> None:
+        self.closed = False
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def test_tcp_port_listening_is_reachable_and_says_what_that_means():
+    sock = _Sock()
+    seen: dict = {}
+
+    def connect(address, timeout=None):
+        seen["address"], seen["timeout"] = address, timeout
+        return sock
+
+    p = TcpPortProbe("e", device("tcp_port", host="127.0.0.1", port=50008,
+                                 label="Reactor Device Server (OPC UA)"), connect=connect)
+    obs = p.probe()
+    assert obs.reachable and obs.state == "ready" and obs.activity == "idle"
+    assert seen["address"] == ("127.0.0.1", 50008)
+    assert sock.closed, "the probe must not hold the socket open"
+    assert "Reactor Device Server (OPC UA)" in obs.message
+    assert "operating state not monitored" in obs.message
+    assert obs.components["endpoint"].state == "listening"
+    assert obs.metrics["connect_latency"].unit == "ms"
+
+
+def test_tcp_port_refused_is_unreachable_not_error():
+    def refuse(address, timeout=None):
+        raise ConnectionRefusedError("connection refused")
+
+    obs = TcpPortProbe("e", device("tcp_port", port=50008, label="OPC UA"), connect=refuse).probe()
+    assert not obs.reachable and obs.state == "unknown"
+    assert "OPC UA" in obs.message
+
+
+def test_tcp_port_defaults_to_loopback_and_honours_a_custom_timeout():
+    seen: dict = {}
+
+    def connect(address, timeout=None):
+        seen["address"], seen["timeout"] = address, timeout
+        return _Sock()
+
+    TcpPortProbe("e", device("tcp_port", port=22, timeout_s=0.5), connect=connect).probe()
+    assert seen["address"] == ("127.0.0.1", 22) and seen["timeout"] == 0.5
+
+
+# -- Windows service ---------------------------------------------------------
+
+def _sc(state: str, code: int = 0):
+    output = f"SERVICE_NAME: svc\n        TYPE               : 10  WIN32_OWN_PROCESS\n        STATE              : 4  {state}\n"
+    return lambda service: (code, output)
+
+
+def test_windows_service_running_is_ready_and_disclaims_the_instrument():
+    obs = WindowsServiceProbe("h", device("windows_service", kind="hplc", service="Agilent Chemstation Data Service",
+                                          label="Agilent ChemStation data service"), query=_sc("RUNNING")).probe()
+    assert obs.reachable and obs.state == "ready" and obs.activity == "idle"
+    assert "instrument's own state is not monitored" in obs.message
+    assert obs.components["service"].connected and obs.details["service_state"] == "RUNNING"
+
+
+def test_windows_service_stopped_is_requires_init_never_error():
+    # The instrument may be fine and driven from its own front end, so a stopped
+    # vendor service must not read as a hardware fault.
+    obs = WindowsServiceProbe("h", device("windows_service", service="svc"), query=_sc("STOPPED")).probe()
+    assert obs.reachable and obs.state == "requires_init" and obs.last_error is None
+    assert "stopped" in obs.message
+
+
+def test_windows_service_paused_and_transitional_states():
+    paused = WindowsServiceProbe("h", device("windows_service", service="svc"), query=_sc("PAUSED")).probe()
+    starting = WindowsServiceProbe("h", device("windows_service", service="svc"), query=_sc("START_PENDING")).probe()
+    assert paused.state == "degraded"
+    assert starting.state == "unknown" and "start pending" in starting.message
+
+
+def test_windows_service_not_installed_is_a_reported_fault_not_a_link_failure():
+    obs = WindowsServiceProbe("h", device("windows_service", service="Nope"),
+                              query=lambda s: (1060, "The specified service does not exist")).probe()
+    assert obs.reachable and obs.state == "error"
+    assert obs.last_error is not None and obs.last_error.code == "service_not_installed"
+
+
+def test_windows_service_unparseable_or_missing_sc_is_unreachable():
+    garbled = WindowsServiceProbe("h", device("windows_service", service="svc"),
+                                  query=lambda s: (0, "not a service listing")).probe()
+    assert not garbled.reachable
+
+    def no_sc(service):
+        raise FileNotFoundError("sc")
+
+    missing = WindowsServiceProbe("h", device("windows_service", service="svc"), query=no_sc).probe()
+    assert not missing.reachable and "not Windows" in missing.message
+
+
+def test_windows_service_never_shells_out_to_a_mutating_verb():
+    import inspect
+
+    from gibbie_server.probes import windows_service
+
+    source = inspect.getsource(windows_service)
+    for verb in ('"start"', '"stop"', '"pause"', '"continue"', '"config"'):
+        assert verb not in source, f"a monitor must never run sc {verb}"
+
+
+# -- UR CB3 fallback ---------------------------------------------------------
+
+class _CB3Dashboard:
+    """A PolyScope 3.x dashboard: knows `safetymode`, rejects `safetystatus`."""
+
+    def __init__(self, host, port, timeout=None) -> None:
+        self.asked: list[str] = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return None
+
+    def query(self, command: str) -> str:
+        self.asked.append(command)
+        return {
+            "robotmode": "Robotmode: RUNNING",
+            "safetystatus": "Unknown command",
+            "safetymode": "Safetymode: NORMAL",
+            "programState": "STOPPED prog.urp",
+            "get loaded program": "Loaded program: /programs/prog.urp",
+        }[command]
+
+
+def test_ur_dashboard_falls_back_to_safetymode_on_a_cb3():
+    seen = {}
+
+    def factory(host, port, timeout=None):
+        seen["dash"] = _CB3Dashboard(host, port)
+        return seen["dash"]
+
+    obs = UrDashboardProbe("a", device("ur_dashboard", kind="robot_arm", host="192.168.254.16"),
+                           client_factory=factory).probe()
+    assert obs.reachable and obs.state == "ready"
+    assert seen["dash"].asked[:3] == ["robotmode", "safetystatus", "safetymode"]
+    assert obs.details["safety_source"] == "safetymode"
+    assert obs.details["safetystatus"] == "NORMAL"

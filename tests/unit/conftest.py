@@ -12,6 +12,11 @@ def example_config() -> Config:
     return load_config(ROOT / "config.example.toml")
 
 
+@pytest.fixture
+def process_chemistry_config() -> Config:
+    return load_config(ROOT / "config.process-chemistry.example.toml")
+
+
 def device(probe: str, kind: str = "other", **opts) -> DeviceConfig:
     return DeviceConfig(name=f"test {probe}", kind=kind, probe=probe, **opts)
 

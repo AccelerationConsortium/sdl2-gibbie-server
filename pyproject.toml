@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "sdl2-gibbie-server"
 version = "0.1.0"
-description = "Read-only STATUS_SPEC gateway for the Gibbie sample-prep bench (UR arm, XPR balance, Flex, hotplate, the Gibbie workflow itself)."
+description = "Read-only STATUS_SPEC gateway for a lab bench driven by something other than the dashboard. One instance per bench (Gibbie sample prep, Process Chemistry); devices are config-driven."
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
 license = { text = "MIT" }

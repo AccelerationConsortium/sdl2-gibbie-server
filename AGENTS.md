@@ -14,11 +14,17 @@ Layers on the canonical base in
 
 ## 2. What this repo is
 
-A read-only STATUS_SPEC gateway for the **Gibbie sample-prep bench**, running
-on the Gibbie PC (`sdl2-pc-04`, tailnet 100.64.254.17). One FastAPI process,
-one envelope per device at `/devices/{id}/status` (the same per-path shape as
-`kasa-tapo-services` and `sense-every-zone`), registered in the dashboard's
-`equipment.yaml` with `status_path` per entry and `gateway_fronted: true`.
+A read-only STATUS_SPEC gateway for a lab bench that something else drives.
+One FastAPI process per bench, one envelope per device at
+`/devices/{id}/status` (the same per-path shape as `kasa-tapo-services` and
+`sense-every-zone`), registered in the dashboard's `equipment.yaml` with
+`status_path` per entry and `gateway_fronted: true`.
+
+**One instance per bench, same code, different config.** The Gibbie sample-prep
+bench on `sdl2-pc-04` (tailnet 100.64.254.17) and the Process Chemistry bench on
+`sdl2-pc-00-lle` (100.64.254.13). The repo name is historical; nothing in the
+code is bench-specific, so a new bench is a config file and, at most, a new
+probe. Keep it that way: no `if bench == ...` anywhere.
 
 ```
 src/gibbie_server/
@@ -72,3 +78,19 @@ src/gibbie_server/
   the two.
 - The Gibbie UI bridge binds `127.0.0.1:8000`; it is reachable only from the
   Gibbie PC, which is why this service runs there.
+
+- **Some instruments are only observable from their PC.** The Process Chemistry
+  HPLC answers on none of its network ports (it is ChemStation-driven, unlike
+  the OpenLab-driven UPLC-MS on its own bench), and the EasyMax answers on none
+  of its own either — Mettler's Reactor Device Server runs on the bench PC and
+  serves OPC UA on loopback. So those two tiles observe a Windows service and a
+  loopback port. Say that in the message; never let a tile imply it read the
+  instrument.
+- **A stopped vendor service is not a fault.** `windows_service` maps STOPPED to
+  `requires_init`, because the instrument may be running perfectly well from its
+  own front end. Mapping it to `error` would page someone about hardware that is
+  fine.
+- **CB3 controllers may not know `safetystatus`.** PolyScope 3.x answers
+  `safetymode` instead. The UR probe tries the newer command, falls back, and
+  records which one answered in `details.safety_source`. Verified by unit test,
+  not yet on the Process Chemistry arm itself.

@@ -1,10 +1,21 @@
 # sdl2-gibbie-server
 
-Read-only **STATUS_SPEC v1.2** gateway for the Gibbie sample-prep bench. One
-FastAPI process on the Gibbie PC (`sdl2-pc-04`) polls the bench's devices and
-serves one envelope per device, so the AC Organic Lab dashboard can show them
-and PyPoe can alert when one disappears — without this service ever being able
-to move, heat, weigh or start anything.
+Read-only **STATUS_SPEC v1.2** gateway for a lab bench whose devices are driven
+by something other than the dashboard. One FastAPI process on the bench PC polls
+that bench's devices and serves one envelope per device, so the AC Organic Lab
+dashboard can show them and PyPoe can alert when one disappears — without this
+service ever being able to move, heat, weigh or start anything.
+
+**Two benches run it today, one instance each, same code:**
+
+| Bench | PC | Config | Devices |
+|---|---|---|---|
+| Gibbie sample prep | `sdl2-pc-04` | `config.example.toml` | workflow bridge, UR-3e, XPR balance, Flex, hotplate |
+| Process Chemistry (LLE) | `sdl2-pc-00-lle` | `config.process-chemistry.example.toml` | UR5-CB3, XPR balance, EasyMax reactor service, HPLC data service, pH Pi |
+
+Devices are entirely config-driven: a table per device names a probe, and the
+probe takes its own options from that table. Adding a bench is a config file, so
+the repo name is historical — nothing in the code is Gibbie-specific.
 
 This repo conforms to lab status spec **v1.2** through the §9 read-only clause:
 there are no `/control/*` endpoints, `allowed_actions` is always `[]`, and
@@ -22,14 +33,37 @@ Control of the bench stays in
 | `gibbie_flex` | `liquid_handler` | `flex` | robot-server health + active run; when robot-server is stopped, whether a Gibbie REPL session holds the robot (SSH); camera stream as a component |
 | `gibbie_hotplate` | `other` | `serial_port` | COM7 is enumerated (never opened) |
 
+And on the Process Chemistry bench:
+
+| equipment_id | kind | probe | what is observed |
+|---|---|---|---|
+| `lle_ur5_arm` | `robot_arm` | `ur_dashboard` | as above; this is a CB3, which may answer `safetymode` rather than `safetystatus` (the probe tries both) |
+| `lle_xpr_balance` | `other` | `http_endpoint` | the Mettler XPR SOAP endpoint answers |
+| `lle_easymax` | `other` | `tcp_port` | Mettler's Reactor Device Server accepts OPC UA connections on this PC's loopback |
+| `lle_hplc` | `hplc` | `windows_service` | the Agilent ChemStation data service's state on this PC |
+| `lle_ph_unit` | `other` | `tcp_port` | the pH Pi answers on SSH |
+
+Two of those need explaining, because the device itself tells us nothing. The
+**EasyMax** answers on no network port of its own; what is observable is
+Mettler's reactor service running on the bench PC, which is also what
+`automated-lle` connects to. The **HPLC** likewise answers on none of its ports,
+because it is ChemStation-driven from this PC rather than through an
+instrument-side API like the UPLC-MS on its own bench. In both cases the tile
+means "the vendor's software layer is up", and the message says so.
+
 ### What each tile means
 
 Every probe reports only what it observed (AGENT_RULES §2):
 
-- **Reachability-only probes** (`http_endpoint`, `serial_port`) describe the
-  *link*: `ready` means "the endpoint answers" / "the port exists", and the
-  message says the instrument's operating state is not monitored. A real state
-  read can replace them later.
+- **Reachability-only probes** (`http_endpoint`, `serial_port`, `tcp_port`)
+  describe the *link*: `ready` means "the endpoint answers" / "the port exists"
+  / "something is listening", and the message says the instrument's operating
+  state is not monitored. A real state read can replace them later.
+- **`windows_service`**: `ready` means the vendor service is running, and a
+  *stopped* service reads `requires_init`, never `error` — the instrument may be
+  perfectly healthy and driven from its own front end, so a stopped data service
+  must not raise an alarm about the hardware. It runs `sc query` only; starting
+  a service is a host-ops action with its own whitelist and audit trail.
 - **UR arm**: `busy`/`running` means a program is playing on the controller.
   For Gibbie that is the RTDE control program the workflow uploads, which
   plays for the whole session whether or not an axis is moving. Safety stops
