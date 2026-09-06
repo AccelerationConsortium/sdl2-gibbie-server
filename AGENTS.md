@@ -50,9 +50,19 @@ src/gibbie_server/
   `ssh_key_file` spelled out in `config.toml` and the passphrase in the NSSM
   env (`GIBBIE_FLEX_SSH_KEY_PASSPHRASE`), never an alias alone.
 
-- The UR arm and the XPR balance sit on a **USB Ethernet adapter** on the
-  Gibbie PC (192.168.1.x). Unplugged adapter == both `unknown`; that is the
-  cable, not the devices.
+- **Everything Gibbie is on the lab switch, 192.168.254.x** — the PC at .79
+  (its second onboard NIC; the first, "Ethernet", is unplugged and unused),
+  the Flex .81, the UR-3e .89, the XPR .83 — the same addresses as the
+  workflow's `sdl2_solid_dose/.env` (`ROBOT_IP`, `BALANCE_IP`). The first
+  config shipped with 192.168.1.100 / 192.168.1.1 from an older layout and
+  both tiles read `unknown` for a day (2026-09-06) until it was corrected;
+  192.168.1.x is a *different* segment behind the Cytation PC's USB adapter,
+  with a different UR on it. Other URs on the lab switch (.16 Process
+  Chemistry UR5-CB3, .49) also greet as "Universal Robots Dashboard Server" —
+  identify by address, not by banner.
+- **Balance `unknown` with the arm `ready` means the XPR web service is off at
+  the instrument**, not a network fault: port 8002 is refused and only TCP
+  8000 answers (not HTTP). The workflow's own weighing uses 8002 too.
 - The Flex's robot-server is stopped while the Gibbie REPL owns the hardware
   (one process may hold the Flex's hardware controller). nginx answers 502 in
   that state — the robot is alive, the server is not. The probe distinguishes

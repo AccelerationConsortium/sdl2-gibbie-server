@@ -108,7 +108,7 @@ this gateway counts as unreachable for uptime and alerts:
 
 ```yaml
   - id: gibbie_ur_arm
-    name: UR Arm (Gibbie)
+    name: UR-3e Arm (Gibbie)
     kind: robot_arm
     adapter: http
     protocol: "1.2"

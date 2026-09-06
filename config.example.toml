@@ -25,12 +25,15 @@ probe = "ui_bridge"
 url = "http://127.0.0.1:8000"
 
 [devices.gibbie_ur_arm]
-name = "UR Arm (Gibbie)"
+name = "UR-3e Arm (Gibbie)"
 kind = "robot_arm"
 probe = "ur_dashboard"
 # UR Dashboard Server: plain-text TCP, read-only queries only
 # (robotmode / safetystatus / programState). Never RTDEControlInterface.
-host = "192.168.1.100"
+# The arm is on the lab switch, same address as the workflow's ROBOT_IP
+# (sdl2_solid_dose/.env). Neighbours on that switch that are NOT this arm:
+# the Process Chemistry UR5-CB3 at .16 and a third UR at .49.
+host = "192.168.254.89"
 port = 29999
 
 [devices.gibbie_balance]
@@ -39,7 +42,11 @@ kind = "other"
 probe = "http_endpoint"
 # Mettler XPR SOAP web service. Only reachability is observed; the weighing
 # state is not, so the tile describes the endpoint, not the weighing.
-url = "http://192.168.1.1:8002/MT/Laboratory/Balance/XprXsr/V03/MT"
+# Lab switch, same as the workflow's BALANCE_IP; port 8002 is the web service
+# mt_balance.py talks to. While that service is switched OFF at the balance the
+# port is refused (only TCP 8000 answers, and not with HTTP) and the tile reads
+# `unknown` — enable the web service at the instrument, nothing network-side.
+url = "http://192.168.254.83:8002/MT/Laboratory/Balance/XprXsr/V03/MT"
 
 [devices.gibbie_flex]
 name = "Opentrons Flex (Gibbie)"

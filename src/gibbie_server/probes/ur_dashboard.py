@@ -73,7 +73,9 @@ class UrDashboardProbe(Probe):
 
     def __init__(self, device_id, cfg, *, client_factory: Callable[..., DashboardClient] | None = None) -> None:
         super().__init__(device_id, cfg)
-        self.host = str(cfg.option("host", "192.168.1.100"))
+        # Lab-switch address of Gibbie's UR-3e (the workflow's ROBOT_IP); the
+        # older 192.168.1.100 default pointed at a different bench's segment.
+        self.host = str(cfg.option("host", "192.168.254.89"))
         self.port = int(cfg.option("port", 29999))
         self._factory = client_factory or DashboardClient
 
