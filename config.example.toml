@@ -49,10 +49,16 @@ probe = "flex"
 # hardware). 502 from nginx == robot-server stopped, robot itself alive.
 robot_server_url = "http://192.168.254.81:31950"
 # Optional SSH probe for a live REPL session (the Gibbie driver's python3).
-# Uses the alias from ~/.ssh/config; password from env GIBBIE_FLEX_SSH_PASSWORD
-# when the key needs one. Set enabled = false to skip.
-ssh_alias = "otflex"
+# The service runs as LocalSystem, whose ~/.ssh has nothing, so give the host
+# and key explicitly (the alias is only a fallback lookup in ~/.ssh/config).
+# The key's passphrase comes from the service env: GIBBIE_FLEX_SSH_KEY_PASSPHRASE
+# (or use GIBBIE_FLEX_SSH_PASSWORD for password auth). Without a credential the
+# Flex tile reads `unknown` while robot-server is stopped.
 ssh_enabled = true
+ssh_alias = "otflex"
+ssh_host = "192.168.254.81"
+ssh_user = "root"
+ssh_key_file = 'C:\Users\sdl2\.ssh\ot2_ssh_key'
 # Camera stream the Gibbie UI can start on the robot.
 camera_url = "http://172.31.34.56:8080/video"
 

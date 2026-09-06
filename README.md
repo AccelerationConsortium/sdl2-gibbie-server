@@ -76,13 +76,29 @@ uv run gibbie-server --config config.toml --once     # probe everything once, pr
 uv run gibbie-server --config config.toml            # serve on :8070
 ```
 
-Environment (only for the optional Flex SSH probe): `GIBBIE_FLEX_SSH_PASSWORD`
-or `GIBBIE_FLEX_SSH_KEY_PASSPHRASE`, matching the `otflex` alias in
-`~/.ssh/config`.
+Environment (only for the optional Flex SSH probe): `GIBBIE_FLEX_SSH_KEY_PASSPHRASE`
+for the key named by `ssh_key_file`, or `GIBBIE_FLEX_SSH_PASSWORD` for password
+auth. Give `ssh_host` / `ssh_key_file` explicitly: the service runs as
+LocalSystem, whose `~/.ssh` is empty, so an alias-only setup cannot resolve.
 
 Deploy as an NSSM service named `gibbie-server` per
 `ac-organic-lab/docs/DEVICE_PC_SETUP.md` (`C:\SDL_Tools\uv.exe run --project
 <dir> gibbie-server --config <dir>\config.toml`).
+
+## Deployment record
+
+| host | service | port | runs as | since |
+|---|---|---|---|---|
+| `sdl2-pc-04` (Gibbie PC, tailnet 100.64.254.17) | NSSM `gibbie-server` | 8070 | LocalSystem | 2026-09-06 |
+
+Install layout follows `DEVICE_PC_SETUP.md`: repo at
+`C:\Users\sdl2\Projects\sdl2-gibbie-server`, `uv.exe` and `nssm.exe` in
+`C:\SDL_Tools`, logs in `C:\SDL_Logs\gibbie-server.{out,err}.log`, firewall
+rule "gibbie-server 8070". The venv is synced with `--link-mode copy` and the
+service env carries `UV_LINK_MODE=copy`, so the venv holds real files rather
+than hardlinks into an elevated user's uv cache (the only shell available on
+that PC is an elevated SSH session). Update: `git pull`,
+`C:\SDL_Tools\uv.exe sync --link-mode copy`, `nssm restart gibbie-server`.
 
 ## Registering with the dashboard
 

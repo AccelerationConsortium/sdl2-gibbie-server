@@ -18,6 +18,7 @@ The camera stream is a component, never a reachability signal.
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import Any, Callable, ClassVar
 
@@ -25,6 +26,8 @@ import httpx
 from sdl_lab_contract import ComponentStatus
 
 from .base import Observation, Probe
+
+logger = logging.getLogger(__name__)
 
 _TIMEOUT = 2.0
 _HEADERS = {"Opentrons-Version": "*"}
@@ -54,40 +57,64 @@ def _run_active(runs: list[dict[str, Any]]) -> bool:
     return False
 
 
-def paramiko_ssh_runner(alias: str, command: str) -> str:
-    """Run one command on the robot via the ssh_config alias. Password from
-    GIBBIE_FLEX_SSH_PASSWORD, key passphrase from GIBBIE_FLEX_SSH_KEY_PASSPHRASE."""
+def make_ssh_runner(
+    *,
+    host: str | None = None,
+    user: str | None = None,
+    port: int | None = None,
+    key_file: str | None = None,
+) -> SshRunner:
+    """Build an SSH runner. Explicit `host`/`user`/`key_file` win; anything not
+    given is looked up in ``~/.ssh/config`` under the alias.
 
-    import paramiko
+    Explicit values matter when the service runs as LocalSystem (the fleet's
+    NSSM default): ``~`` is then the SYSTEM profile, which has no ssh config and
+    no keys, so an alias-only setup silently fails to resolve.
 
-    cfg = paramiko.SSHConfig()
-    cfg_path = os.path.expanduser("~/.ssh/config")
-    if os.path.exists(cfg_path):
-        with open(cfg_path) as f:
-            cfg.parse(f)
-    h = cfg.lookup(alias)
-    client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    kwargs: dict[str, Any] = {
-        "hostname": h.get("hostname", alias),
-        "port": int(h.get("port", 22)),
-        "username": h.get("user", "root"),
-        "timeout": _TIMEOUT,
-        "banner_timeout": 5,
-        "auth_timeout": 5,
-    }
-    if h.get("identityfile"):
-        kwargs["key_filename"] = [os.path.expanduser(p) for p in h["identityfile"]]
-        if os.environ.get("GIBBIE_FLEX_SSH_KEY_PASSPHRASE"):
-            kwargs["passphrase"] = os.environ["GIBBIE_FLEX_SSH_KEY_PASSPHRASE"]
-    if os.environ.get("GIBBIE_FLEX_SSH_PASSWORD"):
-        kwargs["password"] = os.environ["GIBBIE_FLEX_SSH_PASSWORD"]
-    client.connect(**kwargs)
-    try:
-        _, stdout, _ = client.exec_command(command, timeout=5)
-        return stdout.read().decode("utf-8", errors="replace").strip()
-    finally:
-        client.close()
+    Secrets come from the environment only: ``GIBBIE_FLEX_SSH_PASSWORD`` or
+    ``GIBBIE_FLEX_SSH_KEY_PASSPHRASE``.
+    """
+
+    def run(alias: str, command: str) -> str:
+        import paramiko
+
+        cfg = paramiko.SSHConfig()
+        cfg_path = os.path.expanduser("~/.ssh/config")
+        if os.path.exists(cfg_path):
+            with open(cfg_path) as f:
+                cfg.parse(f)
+        h = cfg.lookup(alias)
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        kwargs: dict[str, Any] = {
+            "hostname": host or h.get("hostname", alias),
+            "port": int(port or h.get("port", 22)),
+            "username": user or h.get("user", "root"),
+            "timeout": _TIMEOUT,
+            "banner_timeout": 5,
+            "auth_timeout": 5,
+            "allow_agent": False,
+            "look_for_keys": False,
+        }
+        keys = [key_file] if key_file else [os.path.expanduser(p) for p in h.get("identityfile", [])]
+        if keys:
+            kwargs["key_filename"] = keys
+            if os.environ.get("GIBBIE_FLEX_SSH_KEY_PASSPHRASE"):
+                kwargs["passphrase"] = os.environ["GIBBIE_FLEX_SSH_KEY_PASSPHRASE"]
+        if os.environ.get("GIBBIE_FLEX_SSH_PASSWORD"):
+            kwargs["password"] = os.environ["GIBBIE_FLEX_SSH_PASSWORD"]
+        if not keys and "password" not in kwargs:
+            raise RuntimeError(
+                "no SSH credential: set ssh_key_file (+ GIBBIE_FLEX_SSH_KEY_PASSPHRASE) or GIBBIE_FLEX_SSH_PASSWORD"
+            )
+        client.connect(**kwargs)
+        try:
+            _, stdout, _ = client.exec_command(command, timeout=5)
+            return stdout.read().decode("utf-8", errors="replace").strip()
+        finally:
+            client.close()
+
+    return run
 
 
 class FlexProbe(Probe):
@@ -108,7 +135,13 @@ class FlexProbe(Probe):
         self.ssh_enabled = bool(cfg.option("ssh_enabled", bool(self.ssh_alias)))
         self.camera_url = cfg.option("camera_url")
         self._transport = transport
-        self._ssh = ssh_runner or paramiko_ssh_runner
+        self._ssh = ssh_runner or make_ssh_runner(
+            host=cfg.option("ssh_host"),
+            user=cfg.option("ssh_user"),
+            port=cfg.option("ssh_port"),
+            key_file=cfg.option("ssh_key_file"),
+        )
+        self._ssh_failure_logged: str | None = None
 
     @property
     def target(self) -> str:
@@ -133,8 +166,14 @@ class FlexProbe(Probe):
             return None
         try:
             out = self._ssh(str(self.ssh_alias), _REPL_COUNT_CMD)
+            self._ssh_failure_logged = None
             return int(out.strip().splitlines()[-1])
-        except Exception:
+        except Exception as exc:
+            # Logged once per distinct failure, not once per poll.
+            reason = f"{type(exc).__name__}: {exc}"
+            if reason != self._ssh_failure_logged:
+                logger.warning("%s: Flex SSH probe failed (%s); REPL state unknown until it works", self.device_id, reason)
+                self._ssh_failure_logged = reason
             return None
 
     def _camera(self) -> ComponentStatus:

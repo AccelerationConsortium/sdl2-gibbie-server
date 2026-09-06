@@ -45,6 +45,11 @@ src/gibbie_server/
 
 ## 4. Pitfalls
 
+- **The service runs as LocalSystem, so `~` is the SYSTEM profile.** Nothing
+  in `~/.ssh` exists there: the Flex SSH probe needs `ssh_host` /
+  `ssh_key_file` spelled out in `config.toml` and the passphrase in the NSSM
+  env (`GIBBIE_FLEX_SSH_KEY_PASSPHRASE`), never an alias alone.
+
 - The UR arm and the XPR balance sit on a **USB Ethernet adapter** on the
   Gibbie PC (192.168.1.x). Unplugged adapter == both `unknown`; that is the
   cable, not the devices.
