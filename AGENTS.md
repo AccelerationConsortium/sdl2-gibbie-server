@@ -60,9 +60,12 @@ src/gibbie_server/
   with a different UR on it. Other URs on the lab switch (.16 Process
   Chemistry UR5-CB3, .49) also greet as "Universal Robots Dashboard Server" —
   identify by address, not by banner.
-- **Balance `unknown` with the arm `ready` means the XPR web service is off at
-  the instrument**, not a network fault: port 8002 is refused and only TCP
-  8000 answers (not HTTP). The workflow's own weighing uses 8002 too.
+- **The XPR web service is on port 81, not 8002.** Both lab balances answer
+  HTTP on 81 (a bare GET gets 400 — that is the SOAP endpoint refusing GET,
+  and the probe counts any HTTP answer as reachable); 8002 is refused and
+  TCP 8000 is not HTTP. The first config assumed 8002 from the Gibbie
+  workflow's `mt_balance.py`, which is also wrong for these units; the lab's
+  fork of Telescope's `mt_xpr_balance` client defaults to 81.
 - The Flex's robot-server is stopped while the Gibbie REPL owns the hardware
   (one process may hold the Flex's hardware controller). nginx answers 502 in
   that state — the robot is alive, the server is not. The probe distinguishes

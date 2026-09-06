@@ -42,11 +42,13 @@ kind = "other"
 probe = "http_endpoint"
 # Mettler XPR SOAP web service. Only reachability is observed; the weighing
 # state is not, so the tile describes the endpoint, not the weighing.
-# Lab switch, same as the workflow's BALANCE_IP; port 8002 is the web service
-# mt_balance.py talks to. While that service is switched OFF at the balance the
-# port is refused (only TCP 8000 answers, and not with HTTP) and the tile reads
-# `unknown` — enable the web service at the instrument, nothing network-side.
-url = "http://192.168.254.83:8002/MT/Laboratory/Balance/XprXsr/V03/MT"
+# Lab switch, same as the workflow's BALANCE_IP. The XPR web service listens
+# on **port 81** on both lab balances (.83 here, .13 on the Process Chemistry
+# bench) — a GET answers HTTP 400, which the http_endpoint probe rightly
+# counts as "endpoint answering". 8002 (the port the Gibbie workflow's own
+# mt_balance.py assumes) is refused; the lab's fork of Telescope's
+# mt_xpr_balance client defaults to 81 for exactly this reason.
+url = "http://192.168.254.83:81/MT/Laboratory/Balance/XprXsr/V03/MT"
 
 [devices.gibbie_flex]
 name = "Opentrons Flex (Gibbie)"
