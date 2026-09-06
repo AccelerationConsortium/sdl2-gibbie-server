@@ -11,7 +11,7 @@ service ever being able to move, heat, weigh or start anything.
 | Bench | PC | Config | Devices |
 |---|---|---|---|
 | Gibbie sample prep | `sdl2-pc-04` | `config.example.toml` | workflow bridge, UR-3e, XPR balance, Flex, hotplate |
-| Process Chemistry (LLE) | `sdl2-pc-00-lle` | `config.process-chemistry.example.toml` | UR5-CB3, XPR balance, EasyMax reactor service, HPLC data service, pH Pi |
+| Process Chemistry (LLE) | `sdl2-pc-00-lle` | `config.process-chemistry.example.toml` | UR5-CB3, XPR balance, EasyMax reactor service, HPLC data service, pH Pi (tiles are suffixed *(LLE)*) |
 
 Devices are entirely config-driven: a table per device names a probe, and the
 probe takes its own options from that table. Adding a bench is a config file, so

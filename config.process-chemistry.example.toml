@@ -19,7 +19,7 @@ unreachable_after = 2
 # ---------------------------------------------------------------------------
 
 [devices.lle_ur5_arm]
-name = "UR5-CB3 Arm (Process Chemistry)"
+name = "UR5-CB3 Arm (LLE)"
 kind = "robot_arm"
 probe = "ur_dashboard"
 # Lab switch. Read-only dashboard queries only, never RTDE (connecting the
@@ -30,7 +30,7 @@ host = "192.168.254.16"
 port = 29999
 
 [devices.lle_xpr_balance]
-name = "XPR Balance (Process Chemistry)"
+name = "XPR Balance (LLE)"
 kind = "other"
 probe = "http_endpoint"
 # Mettler XPR SOAP web service on port 81 (a GET answers HTTP 400, which is the
@@ -64,7 +64,7 @@ service = "Agilent Chemstation Data Service"
 label = "Agilent ChemStation data service"
 
 [devices.lle_ph_unit]
-name = "pH Unit (Process Chemistry)"
+name = "pH Unit (LLE)"
 kind = "other"
 probe = "tcp_port"
 # Pi Zero 2W running PiZeroCam (camera + LED + motor, colorimetric pH). The
