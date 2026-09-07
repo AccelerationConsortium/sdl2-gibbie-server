@@ -39,18 +39,13 @@ probe = "http_endpoint"
 # mt-xpr-balance-server replaces this tile when it is deployed here.
 url = "http://192.168.254.13:81/MT/Laboratory/Balance/XprXsr/V03/MT"
 
-[devices.lle_easymax]
-name = "EasyMax (Process Chemistry)"
-kind = "other"
-probe = "tcp_port"
-# The EasyMax itself (192.168.254.12) answers on no port we can reach. What is
-# observable is Mettler's Reactor Device Server, which runs ON THIS PC and
-# serves OPC UA on loopback — the same endpoint automated-lle connects to.
-# So this tile means "the reactor service is up", not "the reactor is fine".
-# A real state read needs an OPC UA session (mt-easymax-server, later).
-host = "127.0.0.1"
-port = 50008
-label = "Mettler Toledo Reactor Device Server (OPC UA)"
+# lle_easymax is deliberately NOT here. Since 2026-09-06 that tile is served
+# by mt-easymax-server (NSSM `mt-easymax`, :8082), which opens a real OPC UA
+# session to the Reactor Device Server and reports the instrument's own
+# state — per-zone Tr/Tj, stir rates, and activity from its Stirrer and
+# Thermostat State nodes. A reachability probe of the same endpoint would
+# add a second poll and a second, weaker opinion: it reported `ready`
+# whenever the OPC UA port was listening, including with the reactor off.
 
 [devices.lle_hplc]
 name = "HPLC (Process Chemistry)"
