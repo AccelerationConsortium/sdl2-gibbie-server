@@ -46,6 +46,57 @@ _REPL_COUNT_CMD = (
 SshRunner = Callable[[str, str], str]  # (alias, command) -> stdout
 
 
+def open_ssh_client(
+    alias: str,
+    *,
+    host: str | None = None,
+    user: str | None = None,
+    port: int | None = None,
+    key_file: str | None = None,
+):
+    """Open the explicitly configured Flex SSH connection.
+
+    Kept here so the status probe and camera transport use identical LocalSystem
+    credential resolution without sharing a channel or a REPL process.
+    """
+    import paramiko
+
+    cfg = paramiko.SSHConfig()
+    cfg_path = os.path.expanduser("~/.ssh/config")
+    if os.path.exists(cfg_path):
+        with open(cfg_path) as f:
+            cfg.parse(f)
+    resolved = cfg.lookup(alias)
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    kwargs: dict[str, Any] = {
+        "hostname": host or resolved.get("hostname", alias),
+        "port": int(port or resolved.get("port", 22)),
+        "username": user or resolved.get("user", "root"),
+        "timeout": _TIMEOUT,
+        "banner_timeout": 5,
+        "auth_timeout": 5,
+        "allow_agent": False,
+        "look_for_keys": False,
+    }
+    keys = [key_file] if key_file else [
+        os.path.expanduser(path) for path in resolved.get("identityfile", [])
+    ]
+    if keys:
+        kwargs["key_filename"] = keys
+        if os.environ.get("GIBBIE_FLEX_SSH_KEY_PASSPHRASE"):
+            kwargs["passphrase"] = os.environ["GIBBIE_FLEX_SSH_KEY_PASSPHRASE"]
+    if os.environ.get("GIBBIE_FLEX_SSH_PASSWORD"):
+        kwargs["password"] = os.environ["GIBBIE_FLEX_SSH_PASSWORD"]
+    if not keys and "password" not in kwargs:
+        raise RuntimeError(
+            "no SSH credential: set ssh_key_file (+ GIBBIE_FLEX_SSH_KEY_PASSPHRASE) "
+            "or GIBBIE_FLEX_SSH_PASSWORD"
+        )
+    client.connect(**kwargs)
+    return client
+
+
 def _run_active(runs: list[dict[str, Any]]) -> bool:
     for run in runs:
         if not run.get("current"):
@@ -76,38 +127,9 @@ def make_ssh_runner(
     """
 
     def run(alias: str, command: str) -> str:
-        import paramiko
-
-        cfg = paramiko.SSHConfig()
-        cfg_path = os.path.expanduser("~/.ssh/config")
-        if os.path.exists(cfg_path):
-            with open(cfg_path) as f:
-                cfg.parse(f)
-        h = cfg.lookup(alias)
-        client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        kwargs: dict[str, Any] = {
-            "hostname": host or h.get("hostname", alias),
-            "port": int(port or h.get("port", 22)),
-            "username": user or h.get("user", "root"),
-            "timeout": _TIMEOUT,
-            "banner_timeout": 5,
-            "auth_timeout": 5,
-            "allow_agent": False,
-            "look_for_keys": False,
-        }
-        keys = [key_file] if key_file else [os.path.expanduser(p) for p in h.get("identityfile", [])]
-        if keys:
-            kwargs["key_filename"] = keys
-            if os.environ.get("GIBBIE_FLEX_SSH_KEY_PASSPHRASE"):
-                kwargs["passphrase"] = os.environ["GIBBIE_FLEX_SSH_KEY_PASSPHRASE"]
-        if os.environ.get("GIBBIE_FLEX_SSH_PASSWORD"):
-            kwargs["password"] = os.environ["GIBBIE_FLEX_SSH_PASSWORD"]
-        if not keys and "password" not in kwargs:
-            raise RuntimeError(
-                "no SSH credential: set ssh_key_file (+ GIBBIE_FLEX_SSH_KEY_PASSPHRASE) or GIBBIE_FLEX_SSH_PASSWORD"
-            )
-        client.connect(**kwargs)
+        client = open_ssh_client(
+            alias, host=host, user=user, port=port, key_file=key_file
+        )
         try:
             _, stdout, _ = client.exec_command(command, timeout=5)
             return stdout.read().decode("utf-8", errors="replace").strip()
@@ -120,8 +142,8 @@ def make_ssh_runner(
 class FlexProbe(Probe):
     probe_type: ClassVar[str] = "flex"
     primary_operation: ClassVar[str] = (
-        "a protocol run on robot-server, or an SSH REPL session holding the hardware "
-        "(the Gibbie driver) -- external control, as for the OT-2 gateway"
+        "an observed protocol run on robot-server; SSH REPL ownership is a control "
+        "mode, while Gibbie run activity is reported by the workflow probe"
     )
 
     def __init__(
@@ -133,7 +155,8 @@ class FlexProbe(Probe):
         self.robot_server_url = str(cfg.option("robot_server_url", "http://192.168.254.81:31950")).rstrip("/")
         self.ssh_alias = cfg.option("ssh_alias")
         self.ssh_enabled = bool(cfg.option("ssh_enabled", bool(self.ssh_alias)))
-        self.camera_url = cfg.option("camera_url")
+        self.camera_enabled = bool(cfg.option("camera_enabled", False))
+        self._camera_status: Callable[[], ComponentStatus] | None = None
         self._transport = transport
         self._ssh = ssh_runner or make_ssh_runner(
             host=cfg.option("ssh_host"),
@@ -177,14 +200,14 @@ class FlexProbe(Probe):
             return None
 
     def _camera(self) -> ComponentStatus:
-        if not self.camera_url:
+        if not self.camera_enabled:
             return ComponentStatus(connected=False, state="not_configured")
-        try:
-            with httpx.Client(timeout=1.5, transport=self._transport) as c:
-                with c.stream("GET", str(self.camera_url)) as r:
-                    return ComponentStatus(connected=r.status_code == 200, state="streaming" if r.status_code == 200 else f"http_{r.status_code}")
-        except (httpx.TransportError, httpx.TimeoutException):
+        if self._camera_status is None:
             return ComponentStatus(connected=False, state="off")
+        return self._camera_status()
+
+    def set_camera_status_provider(self, provider: Callable[[], ComponentStatus]) -> None:
+        self._camera_status = provider
 
     # -- observation --------------------------------------------------------
 
@@ -221,8 +244,13 @@ class FlexProbe(Probe):
             return Observation(True, "ready", "idle", "robot-server up, no run active", components, details=details)
         # robot-server stopped: the robot is alive (nginx answered).
         if repl_count:
-            return Observation(True, "busy", "running",
-                               "Under SSH REPL control (Gibbie driver); robot-server stopped", components, details=details)
+            # A bare REPL is the available control transport, just as an idle
+            # robot-server is. Its mere presence does not prove that a Gibbie
+            # workflow is moving hardware; that activity is reported by the
+            # separate workflow probe. Keep transport ownership in components
+            # and reserve busy/running for an observed operation.
+            return Observation(True, "ready", "idle",
+                               "REPL control available; robot-server HTTP off", components, details=details)
         if repl_count is None:
             # Robot alive, robot-server stopped, and we cannot see whether a REPL
             # holds it: the state is genuinely undetermined (§2.1). Enable the SSH

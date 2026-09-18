@@ -70,11 +70,18 @@ Every probe reports only what it observed (AGENT_RULES §2):
   read `error`, e-stops `e_stop`, powered-off `requires_init`.
 - **Flex**: with robot-server up, `busy` means an active run. With robot-server
   stopped (the normal state while Gibbie drives the robot through its SSH
-  REPL, since one process owns the Flex's hardware controller), a live REPL
-  reads `busy`/`running` as external control, no REPL reads `requires_init`,
-  and if the SSH probe is off or failing the tile reads `unknown` — enable it.
+  REPL, since one process owns the Flex's hardware controller), a live REPL is
+  the available control transport and reads `ready`/`idle`; its presence alone
+  does not prove a workflow is running. Gibbie run activity is reported by the
+  separate workflow probe. No REPL reads `requires_init`, and if the SSH probe
+  is off or failing the tile reads `unknown` — enable it.
   nginx's 502 is how "robot alive, server stopped" is told apart from "robot
   gone".
+  Its optional deck camera is demand-driven at
+  `/devices/gibbie_flex/camera/stream`: HTTP mode polls the official
+  `POST /camera/picture` endpoint; REPL mode uses a separate V4L2-over-SSH
+  channel. The URL stays stable across mode changes and no capture runs without
+  a viewer.
 - **Workflow**: a run in `simulation` reads `dry_run` + `running`, so a
   rehearsal never enters the record as lab work.
 - **Unreachable**: after `unreachable_after` consecutive failed probes a
@@ -97,9 +104,12 @@ Every envelope carries `details.readback_age_s`, `last_seen_at`,
 | `GET /devices` | the configured devices and their `status_path`s |
 | `GET /devices/{id}` | `ProbeResponse` for one device |
 | `GET /devices/{id}/status` | that device's `EquipmentStatus` |
+| `GET /devices/{id}/camera/stream` | configured Flex deck camera as demand-driven HTTP/MJPEG |
 
-All handlers are cache-only; the background monitor is the only thing that
-talks to hardware (`[service].poll_interval_s`, default 10 s).
+All status handlers are cache-only; the background monitor is the only thing
+that performs periodic probes (`[service].poll_interval_s`, default 10 s).
+The camera route is the deliberate read-only exception: it opens capture on
+demand and closes it when the final viewer disconnects.
 
 ## Run
 

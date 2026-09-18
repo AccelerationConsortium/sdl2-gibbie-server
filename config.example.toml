@@ -68,8 +68,15 @@ ssh_alias = "otflex"
 ssh_host = "192.168.254.81"
 ssh_user = "root"
 ssh_key_file = 'C:\Users\sdl2\.ssh\ot2_ssh_key'
-# Camera stream the Gibbie UI can start on the robot.
-camera_url = "http://172.31.34.56:8080/video"
+# Demand-driven deck camera. The server exposes one stable HTTP/MJPEG URL at
+# /devices/gibbie_flex/camera/stream. With robot-server up it polls the official
+# POST /camera/picture endpoint; otherwise it opens the workflow-compatible
+# V4L2 stream over its own SSH channel. No capture runs until a viewer connects.
+camera_enabled = true
+camera_device = "/dev/ot_system_camera"
+camera_width = 1280
+camera_height = 720
+camera_http_interval_s = 0.2
 
 [devices.gibbie_hotplate]
 name = "IKA Hotplate (Gibbie)"

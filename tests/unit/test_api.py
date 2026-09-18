@@ -46,3 +46,25 @@ def test_status_is_cache_only_and_unknown_device_is_404():
     c.get("/devices/dev/status"); c.get("/status")
     assert calls["n"] == 0  # handlers never probe
     assert c.get("/devices/nope/status").status_code == 404
+
+
+def test_camera_stream_is_device_scoped_and_demand_driven():
+    class Camera:
+        closed = False
+
+        def multipart(self):
+            yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\nimage\r\n"
+
+        def close(self):
+            self.closed = True
+
+    cfg = config_for(dev=device("serial_port", kind="robot_arm"))
+    camera = Camera()
+    app = create_app(cfg, start_monitor=False, cameras={"dev": camera})
+    with TestClient(app) as client:
+        response = client.get("/devices/dev/camera/stream")
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("multipart/x-mixed-replace")
+        assert b"image" in response.content
+        assert client.get("/devices/nope/camera/stream").status_code == 404
+    assert camera.closed

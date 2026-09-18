@@ -28,6 +28,7 @@ probe. Keep it that way: no `if bench == ...` anywhere.
 
 ```
 src/gibbie_server/
+  camera.py     demand-driven Flex camera: HTTP snapshots or V4L2 over SSH -> MJPEG
   config.py     TOML -> ServiceConfig / DeviceConfig
   probes/       one module per probe type; each returns an Observation
   monitor.py    background poller + per-device debounce (unreachable_after)
@@ -46,6 +47,12 @@ src/gibbie_server/
   `equipment.yaml` with `status_path: /devices/<id>/status`.
 - **Never actuate to test.** If a probe cannot be verified without moving or
   opening something, it is not a probe for this repo.
+- **Flex camera is observational and opt-in.** It is an embedded component of
+  `gibbie_flex`, never a Kasa/Tapo device and never a `/control/*` action.
+  `/devices/{id}/camera/stream` may start read-only capture only while a viewer
+  is connected: official robot-server snapshots in HTTP mode, or a separate
+  V4L2-over-SSH channel in REPL mode. Never start it from a status poll, never
+  autoplay it, and stop the exact capture process when the last viewer leaves.
 - Deploy per `ac-organic-lab/docs/DEVICE_PC_SETUP.md` (uv + NSSM); service
   name `gibbie-server`, port 8070.
 

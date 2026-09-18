@@ -114,10 +114,8 @@ def test_http_endpoint_any_answer_is_reachable():
 
 # -- Flex --------------------------------------------------------------------
 
-def _flex_transport(health_status=200, runs=None, camera=200):
+def _flex_transport(health_status=200, runs=None):
     def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.port == 8080:
-            return httpx.Response(camera, content=b"--frame")
         if request.url.path == "/health":
             return httpx.Response(health_status, json={"name": "8ccec7", "robot_model": "OT-3 Standard", "api_version": "8.5.0"} if health_status == 200 else None,
                                   content=None if health_status == 200 else b"<html>502</html>")
@@ -127,10 +125,16 @@ def _flex_transport(health_status=200, runs=None, camera=200):
     return httpx.MockTransport(handler)
 
 
-def _flex(transport, repl_out="0", ssh=True):
+def _flex(transport, repl_out="0", ssh=True, camera_connected=True):
     cfg = device("flex", kind="liquid_handler", robot_server_url="http://flex:31950", ssh_alias="otflex",
-                 ssh_enabled=ssh, camera_url="http://flex:8080/video")
-    return FlexProbe("f", cfg, transport=transport, ssh_runner=lambda alias, cmd: repl_out)
+                 ssh_enabled=ssh, camera_enabled=True)
+    probe = FlexProbe("f", cfg, transport=transport, ssh_runner=lambda alias, cmd: repl_out)
+    probe.set_camera_status_provider(
+        lambda: ComponentStatus(
+            connected=camera_connected, state="streaming" if camera_connected else "off"
+        )
+    )
+    return probe
 
 
 def test_flex_robot_server_up_idle_and_running():
@@ -144,8 +148,9 @@ def test_flex_robot_server_up_idle_and_running():
 
 def test_flex_502_means_robot_server_stopped_and_repl_decides():
     repl = _flex(_flex_transport(health_status=502), repl_out="1").probe()
-    assert repl.state == "busy" and repl.activity == "running"
+    assert repl.state == "ready" and repl.activity == "idle"
     assert repl.components["robot_server"].state == "stopped" and repl.components["repl_session"].connected
+    assert "REPL control available" in repl.message
 
     none = _flex(_flex_transport(health_status=502), repl_out="0").probe()
     assert none.state == "requires_init" and none.activity == "idle"
@@ -156,7 +161,7 @@ def test_flex_502_means_robot_server_stopped_and_repl_decides():
 
 
 def test_flex_camera_is_a_component_never_a_reachability_signal():
-    obs = _flex(_flex_transport(camera=503)).probe()
+    obs = _flex(_flex_transport(), camera_connected=False).probe()
     assert obs.reachable and obs.components["camera"].connected is False
 
 
