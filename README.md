@@ -81,7 +81,18 @@ Every probe reports only what it observed (AGENT_RULES §2):
   `/devices/gibbie_flex/camera/stream`: HTTP mode polls the official
   `POST /camera/picture` endpoint; REPL mode uses a separate V4L2-over-SSH
   channel. The URL stays stable across mode changes and no capture runs without
-  a viewer.
+  a viewer. The SSH channel reads `camera_device`, by default the camera's
+  stable link `/dev/v4l/by-id/usb-HD_USB_Camera_HD_USB_Camera-video-index0`
+  (`/dev/ot_system_camera` does not exist on this Flex). If `v4l2-ctl` exits,
+  the camera component's message carries its exit status and stderr. A viewer
+  leaving is not logged as a failure.
+  The **pipette camera** (the standalone D435i, owned by `sdl-camera-server`
+  on this PC behind a bearer token) is relayed at
+  `/devices/gibbie_flex/pipette_camera/stream?stream=color|depth`, one upstream
+  request per viewer, with its point-depth readout at
+  `/devices/gibbie_flex/pipette_camera/depth?x=&y=`. It is on when
+  `pipette_camera_url` is set; the token comes from the env var named by
+  `pipette_camera_token_env`.
 - **Workflow**: a run in `simulation` reads `dry_run` + `running`, so a
   rehearsal never enters the record as lab work.
 - **Unreachable**: after `unreachable_after` consecutive failed probes a
@@ -105,11 +116,13 @@ Every envelope carries `details.readback_age_s`, `last_seen_at`,
 | `GET /devices/{id}` | `ProbeResponse` for one device |
 | `GET /devices/{id}/status` | that device's `EquipmentStatus` |
 | `GET /devices/{id}/camera/stream` | configured Flex deck camera as demand-driven HTTP/MJPEG |
+| `GET /devices/{id}/pipette_camera/stream?stream=color\|depth` | the D435i pipette camera, relayed per viewer |
+| `GET /devices/{id}/pipette_camera/depth?x=&y=` | the pipette camera's distance at one pixel |
 
 All status handlers are cache-only; the background monitor is the only thing
 that performs periodic probes (`[service].poll_interval_s`, default 10 s).
-The camera route is the deliberate read-only exception: it opens capture on
-demand and closes it when the final viewer disconnects.
+The camera routes are the deliberate read-only exception: they open capture on
+demand and close it when the final viewer disconnects.
 
 ## Run
 

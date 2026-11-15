@@ -73,10 +73,22 @@ ssh_key_file = 'C:\Users\sdl2\.ssh\ot2_ssh_key'
 # POST /camera/picture endpoint; otherwise it opens the workflow-compatible
 # V4L2 stream over its own SSH channel. No capture runs until a viewer connects.
 camera_enabled = true
-camera_device = "/dev/ot_system_camera"
+# The deck camera's stable link on the Flex (the default). /dev/ot_system_camera
+# does not exist there (robot-server 8.6.0).
+camera_device = "/dev/v4l/by-id/usb-HD_USB_Camera_HD_USB_Camera-video-index0"
 camera_width = 1280
 camera_height = 720
 camera_http_interval_s = 0.2
+# Pipette camera: the standalone D435i, owned by sdl-camera-server on this PC
+# (loopback-only, bearer token). gibbie-server relays its MJPEG color or depth
+# stream at /devices/gibbie_flex/pipette_camera/stream?stream=color|depth, one
+# upstream request per viewer, none without one. The token is read from the
+# service env var named below (NSSM AppEnvironmentExtra), never from this file;
+# use a non-admin token scoped to this camera. Omit pipette_camera_url to disable.
+pipette_camera_url = "http://127.0.0.1:8071"
+pipette_camera_id = "d435i"
+pipette_camera_fps = 10
+pipette_camera_token_env = "GIBBIE_PIPETTE_CAMERA_TOKEN"
 
 [devices.gibbie_hotplate]
 name = "IKA Hotplate (Gibbie)"
