@@ -29,6 +29,7 @@ probe. Keep it that way: no `if bench == ...` anywhere.
 ```
 src/gibbie_server/
   camera.py     demand-driven Flex camera: HTTP snapshots or V4L2 over SSH -> MJPEG
+  pipette_camera.py  D435i pipette camera relay (sdl-camera-server, bearer token from env)
   config.py     TOML -> ServiceConfig / DeviceConfig
   probes/       one module per probe type; each returns an Observation
   monitor.py    background poller + per-device debounce (unreachable_after)

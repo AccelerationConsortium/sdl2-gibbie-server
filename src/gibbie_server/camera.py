@@ -24,6 +24,11 @@ from .probes.flex import open_ssh_client
 logger = logging.getLogger(__name__)
 
 _HEADERS = {"Opentrons-Version": "3"}
+# The deck camera's stable udev link. `/dev/ot_system_camera` does not exist on
+# the Gibbie Flex (robot-server 8.6.0, checked 2026-11-15); the camera is the
+# capture node of the USB "HD USB Camera" (`index0`; `index1` is its metadata
+# node), which by-id keeps stable across reboots and re-plugs.
+DEFAULT_CAMERA_DEVICE = "/dev/v4l/by-id/usb-HD_USB_Camera_HD_USB_Camera-video-index0"
 _BOUNDARY = b"frame"
 
 
@@ -48,7 +53,7 @@ class FlexCamera:
     ) -> None:
         self.cfg = cfg
         self.robot_server_url = str(cfg.option("robot_server_url")).rstrip("/")
-        self.device = str(cfg.option("camera_device", "/dev/ot_system_camera"))
+        self.device = str(cfg.option("camera_device", DEFAULT_CAMERA_DEVICE))
         self.width = int(cfg.option("camera_width", 1280))
         self.height = int(cfg.option("camera_height", 720))
         self.http_interval = float(cfg.option("camera_http_interval_s", 0.2))
@@ -193,6 +198,11 @@ class FlexCamera:
                     self._produce_ssh()
             except Exception as exc:
                 message = f"{type(exc).__name__}: {exc}"
+                if self._stop.is_set():
+                    # The last viewer left and closed the channel under us:
+                    # an ordinary end of capture, not a transport failure.
+                    logger.debug("Flex camera %s capture ended: %s", self._mode, message)
+                    continue
                 logger.warning("Flex camera %s transport failed: %s", self._mode, message)
                 with self._condition:
                     self._latest = None
@@ -240,7 +250,7 @@ class FlexCamera:
                 "--stream-mmap --stream-to=- --stream-count=0"
             )
             command = "sh -c " + shlex.quote(script)
-            _, stdout, _ = client.exec_command(command, timeout=5)
+            _, stdout, stderr = client.exec_command(command, timeout=5)
             first = stdout.readline()
             pid = int(first.decode("ascii") if isinstance(first, bytes) else first)
             channel = stdout.channel
@@ -259,7 +269,9 @@ class FlexCamera:
                 except TimeoutError:
                     continue
                 if not chunk:
-                    raise RuntimeError("V4L2 camera channel closed")
+                    if self._stop.is_set():
+                        return
+                    raise RuntimeError(_closed_reason(channel, stderr))
                 data.extend(chunk)
                 if len(data) > 8 * 1024 * 1024:
                     raise RuntimeError("V4L2 camera frame exceeded 8 MiB")
@@ -281,6 +293,31 @@ class FlexCamera:
                 except Exception:
                     pass
             client.close()
+
+
+def _closed_reason(channel: Any, stderr: Any) -> str:
+    """Say why the V4L2 channel closed: v4l2-ctl's exit status and stderr.
+
+    Without them a wrong device path, a busy camera and an unsupported format
+    all read the same ("channel closed"). The channel has already reached EOF,
+    and its 1 s timeout bounds the reads; nothing here may raise.
+    """
+    reason = "V4L2 camera channel closed"
+    try:
+        if channel.exit_status_ready():
+            reason += f" (exit {channel.recv_exit_status()})"
+    except Exception:
+        pass
+    detail: Any = b""
+    try:
+        if stderr is not None:
+            detail = stderr.read(2048)
+    except Exception:
+        pass
+    if isinstance(detail, bytes):
+        detail = detail.decode("utf-8", errors="replace")
+    detail = " ".join(str(detail).split())[:300]
+    return f"{reason}: {detail}" if detail else reason
 
 
 MJPEG_MEDIA_TYPE = "multipart/x-mixed-replace; boundary=frame"

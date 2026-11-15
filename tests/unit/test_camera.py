@@ -131,3 +131,115 @@ def test_invalid_http_picture_is_not_forwarded():
         camera.close()
         thread.join(timeout=2)
         stream.close()
+
+
+def test_default_device_is_the_cameras_stable_link():
+    from gibbie_server.camera import DEFAULT_CAMERA_DEVICE
+
+    camera = FlexCamera(_cfg())
+    assert camera.device == DEFAULT_CAMERA_DEVICE
+    assert DEFAULT_CAMERA_DEVICE.startswith("/dev/v4l/by-id/") and DEFAULT_CAMERA_DEVICE.endswith("index0")
+    assert FlexCamera(_cfg(camera_device="/dev/video9")).device == "/dev/video9"
+
+
+class _FailingChannel(_Channel):
+    """v4l2-ctl exits at once: EOF on stdout, an exit status, text on stderr."""
+
+    def __init__(self):
+        super().__init__()
+        self.chunks = []
+
+    def recv(self, size):
+        return b""
+
+    def exit_status_ready(self):
+        return True
+
+    def recv_exit_status(self):
+        return 255
+
+
+class _Stderr:
+    def __init__(self, text):
+        self.text = text
+
+    def read(self, size=-1):
+        return self.text
+
+
+class _FailingSshClient(_SshClient):
+    def __init__(self):
+        super().__init__()
+        self.channel = _FailingChannel()
+
+    def exec_command(self, command, timeout=None):
+        self.commands.append(command)
+        if "v4l2-ctl" in command:
+            return None, _Stdout(self.channel), _Stderr(b"Cannot open device /dev/ot_system_camera, exiting.\n")
+        return None, _Stdout(self.channel), None
+
+
+def test_a_v4l2_exit_reports_its_status_and_stderr():
+    transport = httpx.MockTransport(lambda request: httpx.Response(502))
+    camera = FlexCamera(_cfg(), transport=transport, ssh_factory=_FailingSshClient)
+    stream = camera.multipart()
+    iterator = iter(stream)
+
+    def consume():
+        try:
+            next(iterator)
+        except StopIteration:
+            pass
+
+    thread = __import__("threading").Thread(target=consume, daemon=True)
+    thread.start()
+    try:
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline and camera.component_status().state != "unavailable":
+            time.sleep(0.01)
+        status = camera.component_status()
+        assert status.state == "unavailable"
+        assert "exit 255" in (status.message or "")
+        assert "Cannot open device /dev/ot_system_camera, exiting." in (status.message or "")
+    finally:
+        camera.close()
+        thread.join(timeout=2)
+        stream.close()
+
+
+class _ClosableChannel(_Channel):
+    """Streams one frame, then blocks in recv like paramiko until its timeout,
+    returning EOF at once when the channel is closed under it."""
+
+    def __init__(self):
+        super().__init__()
+        self._closing = __import__("threading").Event()
+
+    def recv(self, size):
+        if self.chunks:
+            return self.chunks.pop(0)
+        if self._closing.wait(1):
+            return b""
+        raise TimeoutError
+
+    def close(self):
+        self.closed = True
+        self._closing.set()
+
+
+def test_the_last_viewer_leaving_is_not_logged_as_a_failure(caplog):
+    caplog.set_level("DEBUG", logger="gibbie_server.camera")
+    transport = httpx.MockTransport(lambda request: httpx.Response(502))
+    ssh = _SshClient()
+    ssh.channel = _ClosableChannel()
+    camera = FlexCamera(_cfg(), transport=transport, ssh_factory=lambda: ssh)
+    stream = camera.multipart()
+    try:
+        assert JPEG in next(stream)
+    finally:
+        stream.close()
+        camera.close()
+    assert ssh.channel.closed and ssh.closed
+    warnings = [r for r in caplog.records if r.name == "gibbie_server.camera" and r.levelname == "WARNING"]
+    assert warnings == []
+    assert camera.component_status().state == "off"

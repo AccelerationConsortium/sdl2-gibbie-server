@@ -73,7 +73,9 @@ ssh_key_file = 'C:\Users\sdl2\.ssh\ot2_ssh_key'
 # POST /camera/picture endpoint; otherwise it opens the workflow-compatible
 # V4L2 stream over its own SSH channel. No capture runs until a viewer connects.
 camera_enabled = true
-camera_device = "/dev/ot_system_camera"
+# The deck camera's stable link on the Flex (the default). /dev/ot_system_camera
+# does not exist there (robot-server 8.6.0).
+camera_device = "/dev/v4l/by-id/usb-HD_USB_Camera_HD_USB_Camera-video-index0"
 camera_width = 1280
 camera_height = 720
 camera_http_interval_s = 0.2
