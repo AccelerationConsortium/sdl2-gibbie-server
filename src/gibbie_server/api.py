@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from sdl_lab_contract import EquipmentStatus, HealthResponse, ProbeResponse
@@ -13,6 +13,7 @@ from .camera import FlexCamera, MJPEG_MEDIA_TYPE
 from .config import Config
 from .envelope import PROTOCOL_VERSION, device_envelope, service_envelope
 from .monitor import Monitor
+from .pipette_camera import PipetteCamera, PipetteCameraUnavailable
 from .probes.flex import FlexProbe
 from .version import __version__
 
@@ -25,12 +26,18 @@ def create_app(
     monitor: Monitor | None = None,
     start_monitor: bool = True,
     cameras: dict[str, FlexCamera] | None = None,
+    pipette_cameras: dict[str, PipetteCamera] | None = None,
 ) -> FastAPI:
     mon = monitor or Monitor(config)
     camera_map = cameras if cameras is not None else {
         device_id: FlexCamera(rec.cfg)
         for device_id, rec in mon.records.items()
         if isinstance(rec.probe, FlexProbe) and rec.cfg.option("camera_enabled", False)
+    }
+    pipette_map = pipette_cameras if pipette_cameras is not None else {
+        device_id: PipetteCamera(rec.cfg)
+        for device_id, rec in mon.records.items()
+        if isinstance(rec.probe, FlexProbe) and rec.cfg.option("pipette_camera_url")
     }
     for device_id, camera in camera_map.items():
         rec = mon.records.get(device_id)
@@ -51,6 +58,7 @@ def create_app(
     app = FastAPI(title="sdl2-gibbie-server", version=__version__, lifespan=lifespan)
     app.state.monitor = mon
     app.state.cameras = camera_map
+    app.state.pipette_cameras = pipette_map
     app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET"], allow_headers=["*"])
 
     @app.get("/", response_model=ProbeResponse)
@@ -100,5 +108,28 @@ def create_app(
             media_type=MJPEG_MEDIA_TYPE,
             headers={"Cache-Control": "no-store"},
         )
+
+    @app.get("/devices/{device_id}/pipette_camera/stream")
+    async def pipette_camera_stream(
+        device_id: str, stream: str = Query("color", pattern="^(color|depth)$")
+    ):
+        camera = pipette_map.get(device_id)
+        if camera is None:
+            raise HTTPException(status_code=404, detail=f"no pipette camera configured for {device_id!r}")
+        try:
+            media_type, body = await camera.open(stream)
+        except PipetteCameraUnavailable as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from None
+        return StreamingResponse(body, media_type=media_type, headers={"Cache-Control": "no-store"})
+
+    @app.get("/devices/{device_id}/pipette_camera/depth")
+    async def pipette_camera_depth(device_id: str, x: int = Query(ge=0), y: int = Query(ge=0)):
+        camera = pipette_map.get(device_id)
+        if camera is None:
+            raise HTTPException(status_code=404, detail=f"no pipette camera configured for {device_id!r}")
+        try:
+            return await camera.depth_at(x, y)
+        except PipetteCameraUnavailable as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from None
 
     return app
